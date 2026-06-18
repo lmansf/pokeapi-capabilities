@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Locations & Encounters — PokéAPI Explorer</title>
+<link rel="stylesheet" href="shared.css">
+<style>
+.mode-toggle { display:flex; gap:0; border:1.5px solid var(--border-medium); border-radius:var(--r-sm); overflow:hidden; }
+.mode-btn { flex:1; padding:9px 18px; font-size:0.86rem; font-weight:700; background:var(--card-bg); border:none; color:var(--text-light); cursor:pointer; transition:var(--t); }
+.mode-btn.on { background:var(--red); color:#fff; }
+.mode-btn:first-child { border-right:1.5px solid var(--border-medium); }
+
+.encounter-badge {
+  display:inline-flex; padding:3px 8px; border-radius:var(--r-sm);
+  font-size:0.68rem; font-weight:700; text-transform:capitalize;
+  background:rgba(61,125,202,0.1); color:var(--blue);
+}
+
+.location-card { border:1px solid var(--border); border-radius:var(--r-lg); overflow:hidden; margin-bottom:8px; }
+.location-card-header {
+  display:flex; align-items:center; justify-content:space-between;
+  padding:13px 18px; background:var(--card-bg); cursor:pointer;
+  transition:var(--t); border-bottom:1px solid transparent; user-select:none;
+}
+.location-card-header:hover { background:var(--bg); }
+.location-card-header.open { border-bottom-color:var(--border); }
+.location-card-header .chevron { transition:transform var(--t); color:var(--text-muted); font-size:0.85rem; }
+.location-card-header.open .chevron { transform:rotate(90deg); }
+.location-name { font-weight:700; font-size:0.92rem; text-transform:capitalize; }
+.location-card-body { display:none; padding:16px 18px; background:var(--card-bg); }
+.location-card-body.open { display:block; }
+
+.enc-pokemon-row { display:flex; align-items:center; gap:12px; padding:8px 0; border-bottom:1px solid var(--border); }
+.enc-pokemon-row:last-child { border-bottom:none; }
+.enc-poke-sprite { width:44px; height:44px; image-rendering:pixelated; flex-shrink:0; }
+.enc-poke-name { font-weight:700; font-size:0.88rem; text-transform:capitalize; flex:1; cursor:pointer; }
+.enc-poke-name:hover { color:var(--blue); }
+.enc-details { font-size:0.74rem; color:var(--text-muted); display:flex; gap:6px; flex-wrap:wrap; }
+.enc-pill { background:var(--bg); padding:2px 8px; border-radius:var(--r-full); white-space:nowrap; }
+
+.region-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(140px,1fr)); gap:10px; }
+.region-card {
+  background:var(--card-bg); border:1px solid var(--border); border-radius:var(--r-lg);
+  padding:16px 14px; cursor:pointer; transition:var(--t); text-align:center;
+}
+.region-card:hover { border-color:var(--border-medium); box-shadow:var(--shadow-sm); transform:translateY(-2px); }
+.region-card.on { border-color:var(--red); box-shadow:0 0 0 2px rgba(204,0,0,0.15); }
+.region-icon { font-size:1.8rem; margin-bottom:6px; }
+.region-name { font-size:0.88rem; font-weight:800; text-transform:capitalize; }
+.region-games { font-size:0.7rem; color:var(--text-muted); margin-top:2px; }
+
+.version-tabs { display:flex; flex-wrap:wrap; gap:4px; margin-bottom:14px; }
+.ver-tab {
+  padding:4px 12px; border-radius:var(--r-full); font-size:0.76rem; font-weight:700;
+  cursor:pointer; border:1.5px solid var(--border-medium); color:var(--text-light);
+  background:var(--card-bg); transition:var(--t); text-transform:capitalize;
+}
+.ver-tab:hover { border-color:var(--text-muted); color:var(--text); }
+.ver-tab.on { background:var(--blue); color:#fff; border-color:transparent; }
+.ver-panel { display:none; }
+.ver-panel.on { display:block; }
+</style>
+</head>
+<body>
+<aside id="sidebar"></aside>
+<main id="main">
+<div class="page">
+
+  <div class="page-header">
+    <h1>🗺️ Locations &amp; Encounters</h1>
+    <p>Find where any Pokémon can be caught in the wild, or explore a region's locations and encounter tables. Uses <code style="font-size:0.9em;background:var(--bg);padding:2px 6px;border-radius:4px">/api/v2/pokemon/{id}/encounters</code> and <code style="font-size:0.9em;background:var(--bg);padding:2px 6px;border-radius:4px">/api/v2/location-area/{name}</code>.</p>
+  </div>
+
+  <!-- Mode Toggle -->
+  <div class="card" style="margin-bottom:16px">
+    <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+      <div class="mode-toggle">
+        <button class="mode-btn on" id="mode-pokemon-btn" onclick="setMode('pokemon')">🔍 Find by Pokémon</button>
+        <button class="mode-btn"    id="mode-region-btn"  onclick="setMode('region')">🌍 Browse by Region</button>
+      </div>
+      <div id="mode-desc" style="font-size:0.84rem;color:var(--text-light)">Enter a Pokémon name to see all locations where it appears in the wild</div>
+    </div>
+  </div>
+
+  <!-- POKEMON MODE -->
+  <div id="mode-pokemon">
+    <div class="card" style="margin-bottom:16px">
+      <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+        <div class="input-wrap" style="flex:1;min-width:220px;max-width:380px">
+          <span class="input-icon">⚡</span>
+          <input id="poke-search" class="input" placeholder="Enter Pokémon name or #…" autocomplete="off">
+        </div>
+        <button class="btn btn-primary" onclick="searchPokemonEncounters()">Find Locations</button>
+      </div>
+      <!-- Quick picks rendered by JS -->
+      <div class="flex gap-6 wrap mt-12" id="quick-picks"></div>
+    </div>
+    <div id="pokemon-encounter-result"></div>
+  </div>
+
+  <!-- REGION MODE -->
+  <div id="mode-region" class="hidden">
+    <div class="card" style="margin-bottom:16px">
+      <h3 style="margin-bottom:14px">Select a Region</h3>
+      <!-- Region cards rendered by JS -->
+      <div class="region-grid" id="region-grid"></div>
+    </div>
+    <div id="region-locations"></div>
+  </div>
+
+</div>
+</main>
+<script src="shared.js"></script>
+<script>
+buildSidebar('locations');
+
+/* === STATIC DATA === */
+const QUICK_PICKS = ['pikachu','eevee','geodude','magikarp','snorlax','lapras','ralts','feebas'];
+
+const REGIONS = [
+  {name:'kanto',  icon:'🔴', games:'Red / Blue / Yellow'},
+  {name:'johto',  icon:'🌿', games:'Gold / Silver / Crystal'},
+  {name:'hoenn',  icon:'🌊', games:'Ruby / Sapphire / Emerald'},
+  {name:'sinnoh', icon:'❄️', games:'Diamond / Pearl / Platinum'},
+  {name:'unova',  icon:'⚡', games:'Black / White'},
+  {name:'kalos',  icon:'🗼', games:'X / Y'},
+  {name:'alola',  icon:'🌺', games:'Sun / Moon'},
+  {name:'galar',  icon:'🏰', games:'Sword / Shield'},
+];
+
+/* Render quick-pick pills */
+document.getElementById('quick-picks').innerHTML = QUICK_PICKS
+  .map(n => `<button class="pill" onclick="quickPick('${n}')">${cap(n)}</button>`)
+  .join('');
+
+/* Render region cards */
+document.getElementById('region-grid').innerHTML = REGIONS
+  .map(r => `
+    <div class="region-card" id="region-card-${r.name}" onclick="selectRegion('${r.name}')">
+      <div class="region-icon">${r.icon}</div>
+      <div class="region-name">${r.name}</div>
+      <div class="region-games">${r.games}</div>
+    </div>`)
+  .join('');
+
+/* === MODE TOGGLE === */
+let currentMode = 'pokemon';
+
+function setMode(mode) {
+  currentMode = mode;
+  document.getElementById('mode-pokemon').classList.toggle('hidden', mode !== 'pokemon');
+  document.getElementById('mode-region').classList.toggle('hidden',  mode !== 'region');
+  document.getElementById('mode-pokemon-btn').classList.toggle('on', mode === 'pokemon');
+  document.getElementById('mode-region-btn').classList.toggle('on',  mode === 'region');
+  document.getElementById('mode-desc').textContent = mode === 'pokemon'
+    ? 'Enter a Pokémon name to see all locations where it appears in the wild'
+    : 'Select a region to browse all its locations and encounter tables';
+}
+
+/* === POKEMON ENCOUNTER SEARCH === */
+function quickPick(name) {
+  document.getElementById('poke-search').value = name;
+  searchPokemonEncounters();
+}
+
+async function searchPokemonEncounters() {
+  const raw = document.getElementById('poke-search').value.trim();
+  if (!raw) return;
+  const q = raw.toLowerCase().replace(/\s+/g, '-');
+  const result = document.getElementById('pokemon-encounter-result');
+  result.innerHTML = loadingHTML(`Looking up ${cap(q)}'s encounter locations…`);
+
+  try {
+    const [poke, encounters] = await Promise.all([
+      apiFetch(`/pokemon/${q}`),
+      apiFetch(`/pokemon/${q}/encounters`),
+    ]);
+
+    const id = poke.id;
+
+    /* --- No wild encounters --- */
+    if (!encounters.length) {
+      result.innerHTML = `
+        <div class="card">
+          <div style="display:flex;align-items:center;gap:16px;margin-bottom:16px">
+            <img src="${artworkUrl(id)}" style="width:72px;height:72px;image-rendering:pixelated" onerror="this.src='${spriteUrl(id)}'">
+            <div>
+              <h2 style="margin-bottom:6px">${cap(poke.name)}</h2>
+              ${typeBadges(poke.types)}
+            </div>
+          </div>
+          <div class="alert alert-warn">
+            <span>⚠️</span>
+            <span><strong>${cap(poke.name)}</strong> cannot be found in the wild in any game. It must be obtained via evolution, trade, or event.</span>
+          </div>
+          <div style="background:var(--code-bg);border-radius:var(--r-sm);padding:10px 14px;font-family:monospace;font-size:0.74rem;color:#94e2d5;margin-top:14px">
+            GET /api/v2/pokemon/${q}/encounters → []
+          </div>
+        </div>`;
+      return;
+    }
+
+    /* --- Group encounters by game version --- */
+    const byVersion = {};
+    encounters.forEach(enc => {
+      enc.version_details.forEach(vd => {
+        const v = vd.version.name;
+        if (!byVersion[v]) byVersion[v] = [];
+        const details = vd.encounter_details || [];
+        byVersion[v].push({
+          location: enc.location_area.name,
+          methods:  [...new Set(details.map(e => e.method?.name).filter(Boolean))],
+          minLevel: details.length ? Math.min(...details.map(e => e.min_level)) : 0,
+          maxLevel: details.length ? Math.max(...details.map(e => e.max_level)) : 0,
+          chance:   details.reduce((s, e) => s + (e.chance || 0), 0),
+        });
+      });
+    });
+
+    const versions = Object.keys(byVersion);
+    const firstVer = versions[0];
+
+    /* Build version tabs + panels HTML */
+    const tabsHtml = versions.map((v, i) =>
+      `<button class="ver-tab${i === 0 ? ' on' : ''}" data-ver="${v}" onclick="switchVerTab(this)">${cap(v)}</button>`
+    ).join('');
+
+    const panelsHtml = versions.map((v, i) => {
+      const rows = byVersion[v].map(loc => `
+        <tr>
+          <td style="font-weight:600;text-transform:capitalize">${cap(loc.location)}</td>
+          <td>${loc.methods.map(m => `<span class="encounter-badge">${cap(m)}</span>`).join(' ') || '—'}</td>
+          <td style="font-size:0.88rem;white-space:nowrap">${loc.minLevel}–${loc.maxLevel}</td>
+          <td style="font-weight:700;color:${loc.chance > 30 ? '#27ae60' : loc.chance > 10 ? '#f39c12' : '#e74c3c'}">${loc.chance}%</td>
+        </tr>`).join('');
+      return `
+        <div class="ver-panel${i === 0 ? ' on' : ''}" data-ver="${v}">
+          <table class="data-table" style="width:100%">
+            <thead><tr><th>Location Area</th><th>Method</th><th>Levels</th><th>Rate</th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>`;
+    }).join('');
+
+    result.innerHTML = `
+      <div class="card">
+        <div style="display:flex;align-items:center;gap:16px;margin-bottom:20px;flex-wrap:wrap">
+          <img src="${artworkUrl(id)}" style="width:88px;height:88px;image-rendering:pixelated;flex-shrink:0"
+               onerror="this.src='${spriteUrl(id)}'">
+          <div>
+            <h2 style="margin-bottom:6px">${cap(poke.name)}</h2>
+            ${typeBadges(poke.types)}
+            <div style="margin-top:8px;font-size:0.82rem;color:var(--text-light)">
+              Found in <strong>${encounters.length}</strong> location area${encounters.length !== 1 ? 's' : ''}
+              across <strong>${versions.length}</strong> game version${versions.length !== 1 ? 's' : ''}
+            </div>
+          </div>
+        </div>
+
+        <div style="background:var(--code-bg);border-radius:var(--r-sm);padding:10px 14px;font-family:monospace;font-size:0.74rem;color:#94e2d5;margin-bottom:20px">
+          GET /api/v2/pokemon/${q}/encounters → ${encounters.length} location areas
+        </div>
+
+        <div class="version-tabs">${tabsHtml}</div>
+        ${panelsHtml}
+      </div>`;
+
+  } catch (e) {
+    result.innerHTML = errorHTML(`Could not find "${raw}". Check the spelling and try again.`);
+  }
+}
+
+function switchVerTab(btn) {
+  const card = btn.closest('.card');
+  const ver = btn.dataset.ver;
+  card.querySelectorAll('.ver-tab').forEach(t => t.classList.remove('on'));
+  card.querySelectorAll('.ver-panel').forEach(p => p.classList.remove('on'));
+  btn.classList.add('on');
+  card.querySelector(`.ver-panel[data-ver="${ver}"]`)?.classList.add('on');
+}
+
+/* === REGION BROWSER === */
+let selectedRegion = null;
+
+async function selectRegion(name) {
+  /* Update card highlight */
+  if (selectedRegion) {
+    document.getElementById(`region-card-${selectedRegion}`)?.classList.remove('on');
+  }
+  selectedRegion = name;
+  document.getElementById(`region-card-${name}`)?.classList.add('on');
+
+  const locDiv = document.getElementById('region-locations');
+  locDiv.innerHTML = loadingHTML(`Loading ${cap(name)} locations…`);
+
+  try {
+    const regionData = await apiFetch(`/region/${name}`);
+    const locations  = regionData.locations || [];
+
+    if (!locations.length) {
+      locDiv.innerHTML = `<div class="card">${emptyHTML('No locations found for this region.')}</div>`;
+      return;
+    }
+
+    /* Render accordion list — bodies start empty, filled on first open */
+    const locCardsHtml = locations.map(loc => `
+      <div class="location-card">
+        <div class="location-card-header" onclick="toggleLocation(this, '${loc.name}')">
+          <div class="location-name">${cap(loc.name)}</div>
+          <span class="chevron">›</span>
+        </div>
+        <div class="location-card-body">
+          <div id="loc-body-${CSS.escape(loc.name)}"></div>
+        </div>
+      </div>`).join('');
+
+    locDiv.innerHTML = `
+      <div class="card">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+          <h2>${cap(name)} Region</h2>
+          <span style="font-size:0.82rem;color:var(--text-muted)">${locations.length} locations</span>
+        </div>
+        <div class="alert alert-info" style="margin-bottom:16px;font-size:0.82rem">
+          <span>🔗</span>
+          <span>GET /api/v2/region/${name} → ${locations.length} locations. Click any row to load encounter data.</span>
+        </div>
+        ${locCardsHtml}
+      </div>`;
+
+  } catch (e) {
+    locDiv.innerHTML = errorHTML(`Failed to load ${cap(name)} region data.`);
+  }
+}
+
+async function toggleLocation(header, locName) {
+  const body   = header.nextElementSibling;
+  const isOpen = header.classList.contains('open');
+
+  header.classList.toggle('open');
+  body.classList.toggle('open');
+
+  if (isOpen) return; /* Was already open — just collapsed, nothing to load */
+
+  const safeId  = CSS.escape(locName);
+  const container = document.getElementById(`loc-body-${safeId}`);
+  if (!container || container.dataset.loaded) return;
+  container.dataset.loaded = '1';
+
+  container.innerHTML = loadingHTML('Loading areas…');
+
+  try {
+    const loc   = await apiFetch(`/location/${locName}`);
+    const areas = loc.areas || [];
+
+    if (!areas.length) {
+      container.innerHTML = '<p style="color:var(--text-muted);font-size:0.85rem;padding:8px 0">No areas available for this location.</p>';
+      return;
+    }
+
+    /* Render a placeholder for each area, then load each in parallel */
+    container.innerHTML = areas.map(a => `
+      <div style="margin-bottom:14px">
+        <div style="font-size:0.8rem;font-weight:700;color:var(--text-light);margin-bottom:6px;text-transform:capitalize">
+          ${cap(a.name)}
+        </div>
+        <div id="area-${CSS.escape(a.name)}" class="area-encounters">
+          <div class="loading-center" style="padding:16px"><div class="spinner" style="width:22px;height:22px;border-width:2px"></div></div>
+        </div>
+      </div>`).join('');
+
+    areas.forEach(a => loadAreaEncounters(a.name));
+
+  } catch (e) {
+    container.innerHTML = errorHTML('Failed to load location areas.');
+  }
+}
+
+async function loadAreaEncounters(areaName) {
+  const safeId = CSS.escape(areaName);
+  const el = document.getElementById(`area-${safeId}`);
+  if (!el) return;
+
+  try {
+    const data    = await apiFetch(`/location-area/${areaName}`);
+    const pokemon = data.pokemon_encounters || [];
+
+    if (!pokemon.length) {
+      el.innerHTML = '<p style="font-size:0.78rem;color:var(--text-muted);padding:4px 0">No wild Pokémon in this area.</p>';
+      return;
+    }
+
+    /* Show best version's data (first version_details entry) */
+    const rows = pokemon.slice(0, 16).map(({ pokemon: p, version_details: vd }) => {
+      const pid    = urlId(p.url);
+      const detail = vd[0]?.encounter_details || [];
+      const minLv  = detail.length ? Math.min(...detail.map(e => e.min_level)) : '?';
+      const maxLv  = detail.length ? Math.max(...detail.map(e => e.max_level)) : '?';
+      const method = detail[0]?.method?.name || '';
+      const chance = detail.reduce((s, e) => s + (e.chance || 0), 0);
+
+      return `
+        <div class="enc-pokemon-row">
+          <img class="enc-poke-sprite" src="${spriteUrl(pid)}" alt="${p.name}" loading="lazy">
+          <div class="enc-poke-name" onclick="window.location='pokemon.html?q=${p.name}'">${cap(p.name)}</div>
+          <div class="enc-details">
+            ${method ? `<span class="enc-pill">${cap(method)}</span>` : ''}
+            <span class="enc-pill">Lv ${minLv}–${maxLv}</span>
+            <span class="enc-pill">${chance}%</span>
+          </div>
+        </div>`;
+    }).join('');
+
+    const extra = pokemon.length > 16
+      ? `<p style="font-size:0.74rem;color:var(--text-muted);margin-top:6px">+${pokemon.length - 16} more Pokémon</p>`
+      : '';
+
+    el.innerHTML = rows + extra;
+
+  } catch (e) {
+    el.innerHTML = '<p style="font-size:0.78rem;color:var(--text-muted)">Could not load encounter data.</p>';
+  }
+}
+
+/* === KEYBOARD & QUERY STRING === */
+document.getElementById('poke-search').addEventListener('keydown', e => {
+  if (e.key === 'Enter') searchPokemonEncounters();
+});
+
+const qs = new URLSearchParams(location.search);
+if (qs.get('q')) {
+  document.getElementById('poke-search').value = qs.get('q');
+  searchPokemonEncounters();
+}
+</script>
+</body>
+</html>

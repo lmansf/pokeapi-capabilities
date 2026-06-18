@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Evolution Chains — PokéAPI Explorer</title>
+<link rel="stylesheet" href="shared.css">
+<style>
+.evo-chain-display {
+  display:flex; flex-direction:column; gap:24px;
+}
+.evo-chain-wrap {
+  display:flex; align-items:center; justify-content:center;
+  flex-wrap:wrap; gap:0; padding:28px 16px;
+  background: var(--bg); border-radius: var(--r-xl);
+  min-height:140px;
+}
+
+/* Make evo-poke bigger for this page */
+.evo-poke { min-width:110px; }
+.evo-poke img { width:88px; height:88px; }
+.evo-poke-name { font-size:0.88rem; }
+.evo-poke-types { margin-top:4px; }
+
+/* Breeding info */
+.breeding-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:12px; }
+.breeding-stat { background:var(--bg); border-radius:var(--r); padding:14px 16px; }
+.breeding-label { font-size:0.68rem; font-weight:800; text-transform:uppercase; letter-spacing:0.6px; color:var(--text-muted); margin-bottom:4px; }
+.breeding-val { font-size:0.92rem; font-weight:700; text-transform:capitalize; }
+
+/* Notable chains grid */
+.chain-picks { display:grid; grid-template-columns:repeat(auto-fill,minmax(140px,1fr)); gap:10px; }
+.chain-pick {
+  background:var(--card-bg); border:1px solid var(--border);
+  border-radius:var(--r-lg); padding:12px 10px; text-align:center;
+  cursor:pointer; transition:var(--t);
+}
+.chain-pick:hover { border-color:var(--border-medium); box-shadow:var(--shadow-sm); transform:translateY(-2px); }
+.chain-pick img { width:64px; height:64px; image-rendering:pixelated; margin:0 auto; }
+.chain-pick-name { font-size:0.8rem; font-weight:700; text-transform:capitalize; margin-top:4px; }
+.chain-pick-stages { font-size:0.68rem; color:var(--text-muted); }
+
+.trigger-legend { display:flex; flex-wrap:wrap; gap:10px; margin-top:14px; }
+.trigger-item { display:flex; align-items:center; gap:6px; font-size:0.78rem; color:var(--text-light); }
+.trigger-dot { width:10px; height:10px; border-radius:50%; flex-shrink:0; }
+</style>
+</head>
+<body>
+<aside id="sidebar"></aside>
+<main id="main">
+<div class="page">
+
+  <div class="page-header">
+    <h1>🔄 Evolution Chains</h1>
+    <p>Visualize any Pokémon's full evolutionary line — including branching forms and all conditions. Uses <code style="font-size:0.9em;background:var(--bg);padding:2px 6px;border-radius:4px">/api/v2/pokemon-species</code> then <code style="font-size:0.9em;background:var(--bg);padding:2px 6px;border-radius:4px">/api/v2/evolution-chain/{id}</code>.</p>
+  </div>
+
+  <!-- Search -->
+  <div class="card" style="margin-bottom:16px">
+    <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+      <div class="input-wrap" style="flex:1;min-width:220px;max-width:400px">
+        <span class="input-icon">🔎</span>
+        <input id="evo-search" class="input" placeholder="Enter any Pokémon in the chain (e.g. eevee, pichu, ralts)…" autocomplete="off">
+      </div>
+      <button class="btn btn-primary" onclick="searchEvo()">View Chain</button>
+    </div>
+    <div class="flex gap-6 wrap mt-12" id="quick-pills"></div>
+  </div>
+
+  <!-- Result -->
+  <div id="evo-result"></div>
+
+  <!-- Notable chains showcase -->
+  <div class="card mt-24">
+    <h3 style="margin-bottom:6px">Notable Evolution Families</h3>
+    <p style="font-size:0.85rem;color:var(--text-light);margin-bottom:16px">Handpicked chains that showcase interesting mechanics — branching, item-based, friendship-based, and more.</p>
+    <div class="chain-picks stagger" id="chain-picks"></div>
+  </div>
+
+  <!-- Trigger legend -->
+  <div class="card mt-16">
+    <h3 style="margin-bottom:12px">Evolution Trigger Types</h3>
+    <p style="font-size:0.85rem;color:var(--text-light);margin-bottom:14px">The <code style="font-size:0.9em;background:var(--bg);padding:2px 5px;border-radius:4px">evolution_details</code> array in each chain link explains the exact condition required. Here are the major trigger categories:</p>
+    <div class="grid g2" id="trigger-legend"></div>
+  </div>
+
+</div>
+</main>
+<script src="shared.js"></script>
+<script>
+buildSidebar('evolution');
+
+/* Render quick pills */
+document.getElementById('quick-pills').innerHTML =
+  ['eevee','slowpoke','wurmple','kirlia','feebas','sliggoo','applin','toxel']
+  .map(n=>`<button class="pill" onclick="quickEvo('${n}')">${cap(n)}</button>`).join('');
+
+/* Render chain picks */
+const CHAIN_PICKS = [
+  {name:'pichu',    id:172,  label:'Pichu family',    stages:'3 stages'},
+  {name:'eevee',    id:133,  label:'Eevee family',    stages:'8+ branches'},
+  {name:'ralts',    id:280,  label:'Ralts family',    stages:'Gender split'},
+  {name:'slowpoke', id:79,   label:'Slowpoke family', stages:'Branching'},
+  {name:'wurmple',  id:265,  label:'Wurmple family',  stages:'Random branch'},
+  {name:'tyrogue',  id:236,  label:'Tyrogue family',  stages:'Stat-based'},
+  {name:'shedinja', id:290,  label:'Nincada family',  stages:'Special method'},
+  {name:'applin',   id:840,  label:'Applin family',   stages:'Item branches'},
+];
+document.getElementById('chain-picks').innerHTML = CHAIN_PICKS.map(c=>`
+  <div class="chain-pick" onclick="quickEvo('${c.name}')">
+    <img src="${SPRITES}/${c.id}.png" alt="${c.name}" onerror="this.src='${SPRITES}/1.png'">
+    <div class="chain-pick-name">${c.label}</div>
+    <div class="chain-pick-stages">${c.stages}</div>
+  </div>`).join('');
+
+/* Render trigger legend */
+const TRIGGERS = [
+  {icon:'⬆️', trigger:'Level-up',     desc:'Reach a certain level, sometimes with additional conditions.'},
+  {icon:'💎', trigger:'Item Use',      desc:'Use a specific Evolution Stone (Fire Stone, Thunder Stone, etc.)'},
+  {icon:'🤝', trigger:'Trade',         desc:'Be traded to another player, sometimes holding a specific item.'},
+  {icon:'💛', trigger:'Friendship',    desc:'Reach high friendship/happiness, often during a specific time of day.'},
+  {icon:'🌙', trigger:'Time of Day',   desc:'Level up during daytime or nighttime.'},
+  {icon:'📍', trigger:'Location',      desc:'Level up in a specific area (e.g. Moss Rock, Ice Rock).'},
+  {icon:'💼', trigger:'Held Item',     desc:'Hold a certain item while leveling up.'},
+  {icon:'🎯', trigger:'Known Move',    desc:'Level up while knowing a specific move.'},
+  {icon:'🧬', trigger:'Party Species', desc:'Have a specific Pokémon in the party when leveling up.'},
+  {icon:'🌧️', trigger:'Weather/Other', desc:'Rain outside, overworld conditions, or unique game mechanics.'},
+];
+document.getElementById('trigger-legend').innerHTML = TRIGGERS.map(t=>`
+  <div style="display:flex;gap:12px;align-items:flex-start;padding:10px;background:var(--bg);border-radius:var(--r-sm)">
+    <div style="font-size:1.3rem;flex-shrink:0">${t.icon}</div>
+    <div>
+      <div style="font-weight:700;font-size:0.88rem">${t.trigger}</div>
+      <div style="font-size:0.8rem;color:var(--text-light);margin-top:2px">${t.desc}</div>
+    </div>
+  </div>`).join('');
+
+function quickEvo(name) {
+  document.getElementById('evo-search').value = name;
+  searchEvo();
+}
+
+async function searchEvo() {
+  const q = document.getElementById('evo-search').value.trim().toLowerCase().replace(/\s+/g,'-');
+  if (!q) return;
+  const result = document.getElementById('evo-result');
+  result.innerHTML = loadingHTML(`Fetching species data for ${cap(q)}…`);
+
+  try {
+    // Step 1: Get species to find evolution chain URL
+    const species = await apiFetch(`/pokemon-species/${q}`);
+    const chainUrl = species.evolution_chain?.url;
+    if (!chainUrl) {
+      result.innerHTML = errorHTML(`No evolution chain found for ${cap(q)}.`);
+      return;
+    }
+
+    result.innerHTML = loadingHTML('Loading evolution chain…');
+
+    // Step 2: Get evolution chain
+    const chainData = await apiFetch(chainUrl);
+    const chain = chainData.chain;
+
+    // Step 3: Get base species info
+    const [baseSpecies, pokemon] = await Promise.all([
+      apiFetch(`/pokemon-species/${q}`).catch(()=>null),
+      apiFetch(`/pokemon/${q}`).catch(()=>null),
+    ]);
+
+    // Count chain length
+    function chainLength(node, d=0) {
+      if (!node.evolves_to.length) return d+1;
+      return Math.max(...node.evolves_to.map(n=>chainLength(n,d+1)));
+    }
+    function countNodes(node) {
+      return 1 + node.evolves_to.reduce((s,n)=>s+countNodes(n),0);
+    }
+
+    const totalStages = chainLength(chain);
+    const totalForms  = countNodes(chain);
+
+    // Breeding info
+    const eggGroups   = baseSpecies?.egg_groups?.map(e=>cap(e.name)).join(', ') || '—';
+    const captureRate = baseSpecies?.capture_rate ?? '—';
+    const baseHappy   = baseSpecies?.base_happiness ?? '—';
+    const growthRate  = baseSpecies ? cap(baseSpecies.growth_rate?.name||'—') : '—';
+    const genderRate  = baseSpecies?.gender_rate;
+    let genderStr = '—';
+    if (genderRate !== undefined && genderRate !== null) {
+      if (genderRate === -1) genderStr = 'Genderless';
+      else if (genderRate === 0) genderStr = '100% ♂';
+      else if (genderRate === 8) genderStr = '100% ♀';
+      else genderStr = `${Math.round((genderRate/8)*100)}% ♀ / ${100-Math.round((genderRate/8)*100)}% ♂`;
+    }
+
+    result.innerHTML = `
+      <div class="card">
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:20px">
+          <div>
+            <h2>${cap(chain.species.name)} Evolution Line</h2>
+            <div style="font-size:0.82rem;color:var(--text-light);margin-top:3px">${totalForms} form${totalForms!==1?'s':''} · ${totalStages} stage${totalStages!==1?'s':''}</div>
+          </div>
+          <div style="font-family:monospace;font-size:0.76rem;color:var(--text-muted);background:var(--bg);padding:6px 10px;border-radius:var(--r-sm)">
+            ${chainUrl.replace('https://pokeapi.co','GET')}
+          </div>
+        </div>
+
+        <div class="evo-chain-wrap">
+          <div class="evo-chain">
+            ${renderEvoNode(chain)}
+          </div>
+        </div>
+
+        <div style="margin-top:20px">
+          <div style="font-size:0.72rem;font-weight:800;text-transform:uppercase;letter-spacing:0.8px;color:var(--text-muted);margin-bottom:12px">Species Data (from /pokemon-species/${q})</div>
+          <div class="breeding-grid">
+            <div class="breeding-stat"><div class="breeding-label">Egg Groups</div><div class="breeding-val">${eggGroups}</div></div>
+            <div class="breeding-stat"><div class="breeding-label">Gender Ratio</div><div class="breeding-val">${genderStr}</div></div>
+            <div class="breeding-stat"><div class="breeding-label">Capture Rate</div><div class="breeding-val">${captureRate}/255</div></div>
+            <div class="breeding-stat"><div class="breeding-label">Base Happiness</div><div class="breeding-val">${baseHappy}/255</div></div>
+            <div class="breeding-stat"><div class="breeding-label">Growth Rate</div><div class="breeding-val">${growthRate}</div></div>
+            <div class="breeding-stat"><div class="breeding-label">Is Legendary</div><div class="breeding-val">${baseSpecies?.is_legendary ? '✅ Yes' : '❌ No'}</div></div>
+          </div>
+        </div>
+      </div>`;
+  } catch(e) {
+    result.innerHTML = errorHTML(`Could not find evolution data for "${q}". Check the spelling.`);
+  }
+}
+
+/* Override goToPokemon for this page */
+function goToPokemon(name) {
+  quickEvo(name);
+}
+
+document.getElementById('evo-search').addEventListener('keydown', e => {
+  if (e.key === 'Enter') searchEvo();
+});
+
+const qs = new URLSearchParams(location.search);
+if (qs.get('q')) {
+  document.getElementById('evo-search').value = qs.get('q');
+  searchEvo();
+} else {
+  quickEvo('eevee');
+}
+</script>
+</body>
+</html>

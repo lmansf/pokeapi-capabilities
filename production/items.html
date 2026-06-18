@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Items — PokéAPI Explorer</title>
+<link rel="stylesheet" href="shared.css">
+<style>
+.items-layout { display:grid; grid-template-columns:220px 1fr; gap:20px; align-items:start; }
+.cat-sidebar { position:sticky; top:20px; }
+.cat-list { display:flex; flex-direction:column; gap:2px; max-height:70vh; overflow-y:auto; }
+.cat-item {
+  padding:9px 14px; border-radius:var(--r-sm); cursor:pointer;
+  font-size:0.85rem; font-weight:600; transition:var(--t);
+  text-transform:capitalize; color:var(--text-light);
+  border:1px solid transparent;
+}
+.cat-item:hover { background:var(--bg); color:var(--text); }
+.cat-item.on { background:rgba(204,0,0,0.08); color:var(--red); border-color:rgba(204,0,0,0.15); }
+
+.item-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(180px,1fr)); gap:10px; }
+.item-card {
+  display:flex; align-items:center; gap:10px;
+  padding:10px 12px; border-radius:var(--r);
+  cursor:pointer; transition:var(--t);
+  border:1px solid var(--border); background:var(--card-bg);
+  overflow:hidden;
+}
+.item-card:hover { border-color:var(--border-medium); box-shadow:var(--shadow-xs); transform:translateY(-1px); }
+.item-card img { width:36px; height:36px; image-rendering:pixelated; flex-shrink:0; }
+.item-card-name { font-size:0.82rem; font-weight:700; text-transform:capitalize; line-height:1.3; }
+.item-card-cat  { font-size:0.68rem; color:var(--text-muted); text-transform:capitalize; }
+
+/* Detail panel */
+.item-detail-panel {
+  position:fixed; top:0; right:-480px; width:440px; height:100vh;
+  background:var(--card-bg); box-shadow:-8px 0 40px rgba(0,0,0,0.15);
+  z-index:200; overflow-y:auto; transition:right var(--t-slow);
+}
+.item-detail-panel.open { right:0; }
+.item-detail-hero { padding:28px 24px 20px; background:linear-gradient(135deg,#1a1a2e,#16213e); }
+.item-detail-sprite { width:80px; height:80px; image-rendering:pixelated; margin:0 auto 12px; }
+.item-detail-name { font-size:1.3rem; font-weight:900; color:#fff; text-transform:capitalize; text-align:center; }
+.item-detail-body { padding:24px; }
+.item-stat-row { display:flex; justify-content:space-between; align-items:flex-start; padding:9px 0; border-bottom:1px solid var(--border); font-size:0.86rem; }
+.item-stat-row:last-child { border-bottom:none; }
+.item-stat-key { color:var(--text-light); font-weight:600; }
+.item-stat-val { font-weight:700; text-align:right; max-width:240px; text-transform:capitalize; }
+.holder-list { display:flex; flex-wrap:wrap; gap:5px; margin-top:8px; }
+.holder-item { display:flex; align-items:center; gap:4px; font-size:0.72rem; background:var(--bg); border-radius:var(--r-sm); padding:3px 8px; cursor:pointer; transition:var(--t); }
+.holder-item:hover { background:var(--border); }
+.holder-item img { width:24px; height:24px; image-rendering:pixelated; }
+</style>
+</head>
+<body>
+<aside id="sidebar"></aside>
+<main id="main">
+<div class="page">
+
+  <div class="page-header">
+    <h1>🎒 Item Browser</h1>
+    <p>Explore all in-game items organized by category. Uses <code style="font-size:0.9em;background:var(--bg);padding:2px 6px;border-radius:4px">/api/v2/item-category</code>, <code style="font-size:0.9em;background:var(--bg);padding:2px 6px;border-radius:4px">/api/v2/item/{name}</code>, and sprite data.</p>
+  </div>
+
+  <div class="card" style="margin-bottom:16px">
+    <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center">
+      <div class="input-wrap" style="flex:1;min-width:200px;max-width:340px">
+        <span class="input-icon">🔎</span>
+        <input id="item-search" class="input" placeholder="Search items…" autocomplete="off">
+      </div>
+      <div id="item-status" style="font-size:0.82rem;color:var(--text-muted)">Loading categories…</div>
+    </div>
+  </div>
+
+  <div class="items-layout">
+    <!-- Category sidebar -->
+    <div class="cat-sidebar card card-sm">
+      <div style="font-size:0.7rem;font-weight:800;text-transform:uppercase;letter-spacing:0.8px;color:var(--text-muted);margin-bottom:8px">Categories</div>
+      <div class="cat-list" id="cat-list"><div class="loading-center"><div class="spinner"></div></div></div>
+    </div>
+
+    <!-- Item grid -->
+    <div>
+      <div class="alert alert-info" style="margin-bottom:14px;font-size:0.82rem">
+        <span>🔗</span>
+        <span id="api-call-info">Loading from API…</span>
+      </div>
+      <div id="item-grid" class="item-grid stagger">
+        <div class="loading-center" style="grid-column:1/-1"><div class="spinner"></div><span>Select a category…</span></div>
+      </div>
+      <div id="item-pager" style="margin-top:16px;text-align:center"></div>
+    </div>
+  </div>
+
+</div>
+</main>
+
+<!-- Detail panel -->
+<div class="overlay" id="overlay"></div>
+<div class="item-detail-panel" id="item-detail-panel">
+  <div id="item-detail-content"></div>
+</div>
+
+<script src="shared.js"></script>
+<script>
+buildSidebar('items');
+
+let categories = [];
+let currentCat = null;
+let currentItems = [];
+let allItemSearch = [];
+let searchMode = false;
+let itemPage = 0;
+const ITEM_PAGE = 40;
+
+/* Load all categories */
+async function loadCategories() {
+  try {
+    const data = await apiFetch('/item-category?limit=100');
+    categories = data.results;
+    const catList = document.getElementById('cat-list');
+    catList.innerHTML = `<div class="cat-item on" data-cat="all" onclick="selectCat('all')">⭐ All Items</div>` +
+      categories.map(c=>`<div class="cat-item" data-cat="${c.name}" onclick="selectCat('${c.name}')">${cap(c.name)}</div>`).join('');
+    document.getElementById('item-status').textContent = `${data.count} categories loaded`;
+    selectCat('all');
+  } catch(e) {
+    document.getElementById('cat-list').innerHTML = errorHTML('Failed to load categories');
+  }
+}
+
+async function selectCat(catName) {
+  currentCat = catName;
+  searchMode = false;
+  document.getElementById('item-search').value = '';
+  document.querySelectorAll('.cat-item').forEach(el => el.classList.toggle('on', el.dataset.cat === catName));
+
+  const grid = document.getElementById('item-grid');
+  grid.innerHTML = loadingHTML('Loading items…');
+
+  try {
+    if (catName === 'all') {
+      // Load first 200 items
+      const data = await apiFetch('/item?limit=200&offset=0');
+      currentItems = data.results;
+      document.getElementById('api-call-info').innerHTML = `Loaded <strong>${data.count}</strong> items from <strong>GET /api/v2/item?limit=200</strong>`;
+    } else {
+      const data = await apiFetch(`/item-category/${catName}`);
+      currentItems = data.items || [];
+      document.getElementById('api-call-info').innerHTML = `Category "${cap(catName)}" has <strong>${currentItems.length} items</strong> — from <strong>GET /api/v2/item-category/${catName}</strong>`;
+    }
+    itemPage = 0;
+    renderItems(currentItems);
+  } catch(e) {
+    grid.innerHTML = errorHTML('Failed to load items.');
+  }
+}
+
+function renderItems(items) {
+  const grid = document.getElementById('item-grid');
+  const start = itemPage * ITEM_PAGE;
+  const slice = items.slice(start, start + ITEM_PAGE);
+  const total = Math.ceil(items.length / ITEM_PAGE);
+
+  if (!slice.length) { grid.innerHTML = emptyHTML('No items found.'); return; }
+
+  grid.innerHTML = slice.map(item => {
+    const name = item.name || item.url?.split('/').filter(Boolean).pop() || '?';
+    const id = item.url ? urlId(item.url) : '';
+    return `<div class="item-card" onclick="loadItemDetail('${name}')">
+      <img src="https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/items/${name}.png"
+           alt="${name}" onerror="this.src='https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/items/potion.png'">
+      <div><div class="item-card-name">${cap(name)}</div><div class="item-card-cat">${currentCat === 'all' ? '' : cap(currentCat)}</div></div>
+    </div>`;
+  }).join('');
+
+  const pager = document.getElementById('item-pager');
+  if (total > 1) {
+    pager.innerHTML = `
+      <button class="btn btn-secondary btn-sm" onclick="changeItemPage(-1)" ${itemPage===0?'disabled':''}>← Prev</button>
+      <span style="font-size:0.82rem;color:var(--text-muted);margin:0 8px">Page ${itemPage+1}/${total} · ${items.length} items</span>
+      <button class="btn btn-secondary btn-sm" onclick="changeItemPage(1)" ${itemPage>=total-1?'disabled':''}>Next →</button>`;
+  } else {
+    pager.innerHTML = `<span style="font-size:0.8rem;color:var(--text-muted)">${items.length} items</span>`;
+  }
+}
+
+function changeItemPage(d) {
+  const items = searchMode ? allItemSearch : currentItems;
+  const total = Math.ceil(items.length / ITEM_PAGE);
+  itemPage = Math.max(0, Math.min(itemPage+d, total-1));
+  renderItems(items);
+}
+
+/* Item detail */
+async function loadItemDetail(name) {
+  const panel = document.getElementById('item-detail-panel');
+  const overlay = document.getElementById('overlay');
+  const content = document.getElementById('item-detail-content');
+  panel.classList.add('open');
+  overlay.classList.add('on');
+  content.innerHTML = loadingHTML(`Loading ${cap(name)}…`);
+
+  try {
+    const d = await apiFetch(`/item/${name}`);
+
+    const effect = d.effect_entries?.find(e=>e.language.name==='en');
+    const shortEff = effect?.short_effect || '';
+    const longEff  = effect?.effect || '';
+    const flavorEn = d.flavor_text_entries?.find(e=>e.language.name==='en');
+
+    const holders = (d.held_by_pokemon || []).slice(0, 20);
+
+    content.innerHTML = `
+      <div class="item-detail-hero">
+        <div style="display:flex;justify-content:flex-end;padding:0 0 8px">
+          <button class="detail-close" onclick="closeItemDetail()">✕</button>
+        </div>
+        <img class="item-detail-sprite"
+          src="https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/items/${d.name}.png"
+          alt="${d.name}"
+          onerror="this.style.opacity='0.3'">
+        <div class="item-detail-name">${cap(d.name)}</div>
+        ${d.category?.name ? `<div style="margin-top:6px"><span class="badge badge-gray">${cap(d.category.name)}</span></div>` : ''}
+      </div>
+      <div class="item-detail-body">
+        ${flavorEn ? `<p style="font-size:0.86rem;color:var(--text-light);font-style:italic;line-height:1.65;margin-bottom:16px">"${flavorEn.text}"</p>` : ''}
+
+        <div class="item-stat-row"><span class="item-stat-key">Cost</span><span class="item-stat-val">${fmtCost(d.cost)}</span></div>
+        ${d.fling_power ? `<div class="item-stat-row"><span class="item-stat-key">Fling Power</span><span class="item-stat-val">${d.fling_power}</span></div>` : ''}
+        ${d.fling_effect?.name ? `<div class="item-stat-row"><span class="item-stat-key">Fling Effect</span><span class="item-stat-val">${cap(d.fling_effect.name)}</span></div>` : ''}
+        ${d.attributes?.length ? `<div class="item-stat-row"><span class="item-stat-key">Attributes</span><span class="item-stat-val">${d.attributes.map(a=>cap(a.name)).join(', ')}</span></div>` : ''}
+
+        ${shortEff ? `<div style="margin:16px 0 10px">
+          <div style="font-size:0.68rem;font-weight:800;text-transform:uppercase;letter-spacing:0.6px;color:var(--text-muted);margin-bottom:6px">Effect</div>
+          <p style="font-size:0.85rem;color:var(--text);line-height:1.6">${shortEff}</p>
+        </div>` : ''}
+
+        ${holders.length ? `<div style="margin-top:16px">
+          <div style="font-size:0.68rem;font-weight:800;text-transform:uppercase;letter-spacing:0.6px;color:var(--text-muted);margin-bottom:8px">Held by Pokémon (${d.held_by_pokemon.length})</div>
+          <div class="holder-list">
+            ${holders.map(({pokemon:p}) => {
+              const id = urlId(p.url);
+              return `<div class="holder-item" onclick="window.location='pokemon.html?q=${p.name}'" title="${cap(p.name)}">
+                <img src="${spriteUrl(id)}" alt="${p.name}">
+                <span>${cap(p.name)}</span>
+              </div>`;
+            }).join('')}
+            ${d.held_by_pokemon.length > 20 ? `<span style="font-size:0.74rem;color:var(--text-muted)">+${d.held_by_pokemon.length-20} more</span>` : ''}
+          </div>
+        </div>` : ''}
+
+        <div style="background:var(--code-bg);border-radius:var(--r-sm);padding:10px 14px;font-family:monospace;font-size:0.72rem;color:#94e2d5;margin-top:16px">
+          GET /api/v2/item/${name}
+        </div>
+      </div>`;
+  } catch(e) {
+    content.innerHTML = errorHTML('Failed to load item data.');
+  }
+}
+
+function closeItemDetail() {
+  document.getElementById('item-detail-panel').classList.remove('open');
+  document.getElementById('overlay').classList.remove('on');
+}
+document.getElementById('overlay').addEventListener('click', closeItemDetail);
+
+/* Search */
+document.getElementById('item-search').addEventListener('input', debounce(async e => {
+  const q = e.target.value.toLowerCase().trim().replace(/\s+/g,'-');
+  if (!q) { searchMode = false; selectCat(currentCat || 'all'); return; }
+  searchMode = true;
+
+  if (!allItemSearch.length || allItemSearch[0]._query !== q) {
+    // Fetch all items and filter
+    const data = await apiFetch('/item?limit=1500');
+    allItemSearch = data.results.filter(i => i.name.includes(q));
+    allItemSearch._query = q;
+  }
+  itemPage = 0;
+  document.getElementById('api-call-info').innerHTML = `Search results for "<strong>${q}</strong>": ${allItemSearch.length} items`;
+  renderItems(allItemSearch);
+}, 350));
+
+loadCategories();
+</script>
+</body>
+</html>
